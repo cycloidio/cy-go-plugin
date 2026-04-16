@@ -1,18 +1,68 @@
 package main
 
 import (
+	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/cycloidio/cy-go-plugin/sentry"
+	_ "modernc.org/sqlite"
 )
 
+//go:embed schema.sql
+var schema string
+
 func main() {
-	http.HandleFunc("GET /_cy/ping", ping)
-	http.HandleFunc("POST /_cy/events", events)
-	http.HandleFunc("DELETE /_cy/plugin", plugin)
-	http.HandleFunc("POST /_cy/resync", resync)
+	dbFile := os.Getenv("DB_FILE")
+
+	dsn := ":memory:"
+	if dbFile != "" {
+		dsn = dbFile
+	}
+
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		log.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	if dbFile == "" {
+		db.SetMaxOpenConns(1)
+	}
+
+	if _, err := db.Exec(schema); err != nil {
+		log.Fatalf("migrate: %v", err)
+	}
+	if err := sentry.Seed(db); err != nil {
+		log.Fatalf("seed: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /_cy/ping", ping)
+	mux.HandleFunc("POST /_cy/events", events)
+	mux.HandleFunc("DELETE /_cy/plugin", func(w http.ResponseWriter, r *http.Request) {
+		if err := sentry.Clear(db); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		respond(w, "plugin")
+	})
+	mux.HandleFunc("POST /_cy/resync", func(w http.ResponseWriter, r *http.Request) {
+		if err := sentry.Clear(db); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := sentry.Seed(db); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		respond(w, "resync")
+	})
+	mux.HandleFunc("GET /sentry/iframe", sentry.IframeHandler)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -20,25 +70,18 @@ func main() {
 	}
 
 	fmt.Printf("Server is running on port %s\n", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 }
 
-func ping(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"request": "ping"})
+func ping(w http.ResponseWriter, _ *http.Request) {
+	respond(w, "ping")
 }
 
-func events(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"request": "events"})
+func events(w http.ResponseWriter, _ *http.Request) {
+	respond(w, "events")
 }
 
-func plugin(w http.ResponseWriter, r *http.Request) {
+func respond(w http.ResponseWriter, request string) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"request": "plugin"})
-}
-
-func resync(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"request": "resync"})
+	json.NewEncoder(w).Encode(map[string]string{"request": request})
 }
