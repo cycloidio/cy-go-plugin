@@ -2,14 +2,31 @@
   placement:
     type: component
     config:
-      tab_name: Quotes
+      tab_name: Sentry
   widget:
-    query: "select q.message, a.name from quotes as q join authors as a on q.author_id = a.id"
+    query: >
+      SELECT i.title, i.permalink, i.has_seen, i.status
+      FROM issues AS i
+      JOIN projects AS p ON p.id = i.project_id
+      JOIN organizations AS o ON o.id = p.organization_id
     columns:
-      - value: message
-        title: Message
+      - value: title
+        title: Title
         type: string
-      - value: author
-        title: Author
+      - value: permalink
+        title: Permalink
+        type: string
+      - value: has_seen
+        title: Has Seen
+        type: boolean
+      - value: status
+        title: Status
         type: string
 
+- type: iframe
+  placement:
+    type: component
+    config:
+      tab_name: Sentry Preview
+  widget:
+    query: "/sentry/iframe"
