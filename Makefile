@@ -1,9 +1,10 @@
-VERSION=0.0.2
+VERSION=0.0.3
 LOCAL_REGISTRY=localhost:5000
 
 .PHONY: docker-release
 docker-release: ## Builds the base Docker image for the registry
-	@docker build -t cycloid/cy-go-plugin:$(VERSION) .
+	@docker buildx build --provenance=false --sbom=false --platform linux/amd64 \
+            -t cycloid/cy-go-plugin:$(VERSION) --push .
 	@docker push cycloid/cy-go-plugin:$(VERSION)
 
 .PHONY: docker-local
