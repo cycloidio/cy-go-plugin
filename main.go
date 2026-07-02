@@ -63,6 +63,7 @@ func main() {
 		respond(w, "resync")
 	})
 	mux.HandleFunc("GET /sentry/iframe", sentry.IframeHandler)
+	mux.HandleFunc("GET /ui/hello", hello)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -79,6 +80,21 @@ func ping(w http.ResponseWriter, _ *http.Request) {
 
 func events(w http.ResponseWriter, _ *http.Request) {
 	respond(w, "events")
+}
+
+func hello(w http.ResponseWriter, r *http.Request) {
+	message := os.Getenv("MESSAGE")
+	if message == "" {
+		message = "hello world and especially to you <3"
+	}
+	greetingStyle := os.Getenv("GREETING_STYLE")
+	orgCanonical := r.URL.Query().Get("org")
+	w.Header().Set("Content-Type", "text/html")
+	html := fmt.Sprintf("<h1>Hello World</h1>\n<p>%s</p>\n<p>Organization: %s</p>", message, orgCanonical)
+	if greetingStyle != "" {
+		html += fmt.Sprintf("\n<p>Greeting Style: %s</p>", greetingStyle)
+	}
+	fmt.Fprint(w, html)
 }
 
 func respond(w http.ResponseWriter, request string) {
