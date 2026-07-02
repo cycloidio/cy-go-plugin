@@ -1,0 +1,23 @@
+description: This plugin is a dummy plugin which contain only a hello world.
+icon: https://github.com/cycloid-community-catalog/public-stacks/blob/master/stack-dummy/icon.png
+images:
+- https://www.cycloid.io/wp-content/uploads/2025/07/Before_cycloid-v1-1024x636.webp
+scope:
+- organization:project:*
+- organization:credential:*
+configuration:
+- name: "Message"
+  description: "Message to display in the job"
+  key: message
+  widget: simple_text
+  type: string
+  default: "hello world and especially to you <3"
+- name: "Greeting Style"
+  description: "Style of the greeting (formal or casual)"
+  key: greeting_style
+  widget: dropdown
+  type: string
+  default: "casual"
+  values:
+  - "casual"
+  - "formal"

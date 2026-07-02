@@ -30,3 +30,12 @@
       tab_name: Sentry Preview
   widget:
     query: "/sentry/iframe"
+
+- type: iframe
+  placement:
+    type: sideMenuPage
+    config:
+      title: Hello World
+      description: Displays a greeting with the configured message
+  widget:
+    query: "/ui/hello?org=($ .organization_canonical $)"
