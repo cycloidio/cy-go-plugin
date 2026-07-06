@@ -8,6 +8,13 @@ images:
 scope:
 - organization:project:*
 - organization:credential:*
+setup:
+  can_replicate: true
+  readiness_path: /_cy/ping
+  min_cpu: "50m"
+  min_memory: "64Mi"
+  max_cpu: "200m"
+  max_memory: "256Mi"
 configuration:
 - name: "Message"
   description: "Message to display in the job"
