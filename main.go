@@ -5,11 +5,13 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/cycloidio/cy-go-plugin/sentry"
 	_ "modernc.org/sqlite"
@@ -66,7 +68,8 @@ func main() {
 		respond(w, "resync")
 	})
 	mux.HandleFunc("GET /sentry/iframe", sentry.IframeHandler)
-	mux.HandleFunc("GET /ui/hello", hello)
+	mux.HandleFunc("GET /ui/hello", helloRouter)
+	mux.HandleFunc("GET /ui/hello/", helloRouter)
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -118,19 +121,72 @@ func events(w http.ResponseWriter, _ *http.Request) {
 	respond(w, "events")
 }
 
-func hello(w http.ResponseWriter, r *http.Request) {
+func helloRouter(w http.ResponseWriter, r *http.Request) {
+	subPath := strings.TrimPrefix(r.URL.Path, "/ui/hello")
+	subPath = strings.TrimPrefix(subPath, "/")
+
 	message := os.Getenv("MESSAGE")
 	if message == "" {
 		message = "hello world and especially to you <3"
 	}
 	greetingStyle := os.Getenv("GREETING_STYLE")
 	orgCanonical := r.URL.Query().Get("org")
-	w.Header().Set("Content-Type", "text/html")
-	html := fmt.Sprintf("<h1>Hello World</h1>\n<p>%s</p>\n<p>Organization: %s</p>", message, orgCanonical)
-	if greetingStyle != "" {
-		html += fmt.Sprintf("\n<p>Greeting Style: %s</p>", greetingStyle)
+
+	safeMessage := html.EscapeString(message)
+	safeGreetingStyle := html.EscapeString(greetingStyle)
+	safeOrg := html.EscapeString(orgCanonical)
+
+	var pageContent string
+	switch subPath {
+	case "settings":
+		pageContent = fmt.Sprintf(`<h1>Settings</h1>
+<p><strong>MESSAGE:</strong> %s</p>
+<p><strong>GREETING_STYLE:</strong> %s</p>
+<p><strong>Organization:</strong> %s</p>`,
+			safeMessage, safeGreetingStyle, safeOrg)
+	case "about":
+		pageContent = `<h1>About</h1>
+<p>This is the <strong>cy-go-plugin</strong> demo plugin for Cycloid.</p>
+<p>Version: 0.0.8</p>
+<p>It demonstrates multi-page navigation inside a plugin iframe widget.</p>`
+	default:
+		pageContent = fmt.Sprintf(`<h1>Hello World</h1>
+<p>%s</p>
+<p>Organization: %s</p>`, safeMessage, safeOrg)
+		if greetingStyle != "" {
+			pageContent += fmt.Sprintf("\n<p>Greeting Style: %s</p>", safeGreetingStyle)
+		}
 	}
-	fmt.Fprint(w, html)
+
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 16px; }
+  nav { background: #f5f5f5; padding: 8px 16px; margin: -16px -16px 16px; display: flex; gap: 16px; }
+  nav a { color: #1976d2; text-decoration: none; cursor: pointer; font-weight: 500; }
+  nav a:hover { text-decoration: underline; }
+</style>
+<script>
+function navigateTo(subPath) {
+  window.parent.postMessage({
+    type: 'cycloid:navigate',
+    path: subPath
+  }, '*');
+  window.location.href = '/ui/hello' + (subPath ? '/' + subPath : '') + window.location.search;
+}
+</script>
+</head>
+<body>
+<nav>
+  <a onclick="navigateTo(''); return false;" href="#">Home</a>
+  <a onclick="navigateTo('settings'); return false;" href="#">Settings</a>
+  <a onclick="navigateTo('about'); return false;" href="#">About</a>
+</nav>
+%s
+</body>
+</html>`, pageContent)
 }
 
 func respond(w http.ResponseWriter, request string) {
