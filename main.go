@@ -174,7 +174,6 @@ function navigateTo(subPath) {
     type: 'cycloid:navigate',
     path: subPath
   }, '*');
-  window.location.href = '/ui/hello' + (subPath ? '/' + subPath : '') + window.location.search;
 }
 </script>
 </head>
