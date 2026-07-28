@@ -29,4 +29,3 @@ configuration:
   widget: cy_cred
   widget_config:
     cred_types: ["custom"]
-

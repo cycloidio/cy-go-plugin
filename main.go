@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/cycloidio/cy-go-plugin/sentry"
 	_ "modernc.org/sqlite"
@@ -19,6 +21,9 @@ import (
 
 //go:embed schema.sql
 var schema string
+
+// proxyClient is a shared HTTP client with a 10-second timeout for proxy calls.
+var proxyClient = &http.Client{Timeout: 10 * time.Second}
 
 func main() {
 	dbFile := os.Getenv("DB_FILE")
@@ -121,9 +126,66 @@ func events(w http.ResponseWriter, _ *http.Request) {
 	respond(w, "events")
 }
 
+// proxyGet calls the main API via PROXY_URL and returns (body, statusCode, error).
+func proxyGet(ctx context.Context, apiPath string) ([]byte, int, error) {
+	proxyURL := os.Getenv("PROXY_URL")
+	secret := os.Getenv("PLUGIN_SECRET")
+	if proxyURL == "" {
+		return nil, 0, fmt.Errorf("PROXY_URL not set")
+	}
+	target := buildProxyURL(proxyURL, apiPath, secret)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	resp, err := proxyClient.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	return body, resp.StatusCode, err
+}
+
+// buildProxyURL constructs the proxy target URL, safely handling a PROXY_URL
+// that may already contain a query string.
+func buildProxyURL(proxyURL, apiPath, secret string) string {
+	base := strings.TrimRight(proxyURL, "/")
+	path := "/" + strings.TrimLeft(apiPath, "/")
+	u, err := url.Parse(base + path)
+	if err != nil {
+		// Fallback: plain concatenation (shouldn't happen with valid URLs)
+		return base + path + "?secret=" + url.QueryEscape(secret)
+	}
+	q := u.Query()
+	if secret != "" {
+		q.Set("secret", secret)
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+func proxyResultHTML(title, org string, body []byte, status int, err error, note string) string {
+	safeTitle := html.EscapeString(title)
+	safeOrg := html.EscapeString(org)
+	noteHTML := ""
+	if note != "" {
+		noteHTML = "<p><em>" + html.EscapeString(note) + "</em></p>"
+	}
+	if err != nil {
+		return fmt.Sprintf("<h2>%s (org: %s)</h2>%s<p style='color:red'>Error: %s</p>",
+			safeTitle, safeOrg, noteHTML, html.EscapeString(err.Error()))
+	}
+	return fmt.Sprintf("<h2>%s (org: %s) — HTTP %d</h2>%s<pre>%s</pre>",
+		safeTitle, safeOrg, status, noteHTML, html.EscapeString(string(body)))
+}
+
 func helloRouter(w http.ResponseWriter, r *http.Request) {
+	log.Printf("[helloRouter] method=%s path=%s rawQuery=%s", r.Method, r.URL.Path, r.URL.RawQuery)
+
 	subPath := strings.TrimPrefix(r.URL.Path, "/ui/hello")
 	subPath = strings.TrimPrefix(subPath, "/")
+	log.Printf("[helloRouter] subPath=%q", subPath)
 
 	message := os.Getenv("MESSAGE")
 	if message == "" {
@@ -147,8 +209,33 @@ func helloRouter(w http.ResponseWriter, r *http.Request) {
 	case "about":
 		pageContent = `<h1>About</h1>
 <p>This is the <strong>cy-go-plugin</strong> demo plugin for Cycloid.</p>
-<p>Version: 0.0.8</p>
+<p>Version: 0.0.9</p>
 <p>It demonstrates multi-page navigation inside a plugin iframe widget.</p>`
+	case "credentials":
+		if orgCanonical == "" {
+			pageContent = proxyResultHTML("Credentials", "", nil, 0, fmt.Errorf("org parameter is required"), "")
+			break
+		}
+		body, status, err := proxyGet(r.Context(), "organizations/"+url.PathEscape(orgCanonical)+"/credentials")
+		pageContent = proxyResultHTML("Credentials", orgCanonical, body, status, err, "")
+
+	case "projects":
+		if orgCanonical == "" {
+			pageContent = proxyResultHTML("Projects", "", nil, 0, fmt.Errorf("org parameter is required"), "")
+			break
+		}
+		body, status, err := proxyGet(r.Context(), "organizations/"+url.PathEscape(orgCanonical)+"/projects")
+		pageContent = proxyResultHTML("Projects", orgCanonical, body, status, err, "")
+
+	case "roles":
+		if orgCanonical == "" {
+			pageContent = proxyResultHTML("Roles", "", nil, 0, fmt.Errorf("org parameter is required"), "")
+			break
+		}
+		body, status, err := proxyGet(r.Context(), "organizations/"+url.PathEscape(orgCanonical)+"/roles")
+		note := "Note: this plugin does not have organization:role:* scope — a permission error is expected."
+		pageContent = proxyResultHTML("Roles", orgCanonical, body, status, err, note)
+
 	default:
 		pageContent = fmt.Sprintf(`<h1>Hello World</h1>
 <p>%s</p>
@@ -182,6 +269,9 @@ function navigateTo(subPath) {
   <a onclick="navigateTo(''); return false;" href="#">Home</a>
   <a onclick="navigateTo('settings'); return false;" href="#">Settings</a>
   <a onclick="navigateTo('about'); return false;" href="#">About</a>
+  <a onclick="navigateTo('credentials'); return false;" href="#">Credentials</a>
+  <a onclick="navigateTo('projects'); return false;" href="#">Projects</a>
+  <a onclick="navigateTo('roles'); return false;" href="#">Roles</a>
 </nav>
 %s
 </body>
