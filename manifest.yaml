@@ -9,7 +9,6 @@ scope:
 - organization:project:*
 - organization:credential:*
 setup:
-  can_replicate: true
   readiness_path: /_cy/ping
   min_cpu: "50m"
   min_memory: "64Mi"
@@ -22,4 +21,12 @@ configuration:
   widget: simple_text
   type: string
   default: "hello world and especially to you <3"
+- name: "External API Credential"
+  key: external_api_cred
+  description: "Credential for an external API. Select a custom credential; its chosen field will be injected as EXTERNAL_API_CRED env var."
+  required: false
+  type: string
+  widget: cy_cred
+  widget_config:
+    cred_types: ["custom"]
 
