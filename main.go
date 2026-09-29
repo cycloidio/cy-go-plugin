@@ -193,10 +193,13 @@ func helloRouter(w http.ResponseWriter, r *http.Request) {
 	}
 	greetingStyle := os.Getenv("GREETING_STYLE")
 	orgCanonical := r.URL.Query().Get("org")
+	currentUser := r.URL.Query().Get("user")
+	currentUserEmail := r.URL.Query().Get("email")
 
 	safeMessage := html.EscapeString(message)
 	safeGreetingStyle := html.EscapeString(greetingStyle)
 	safeOrg := html.EscapeString(orgCanonical)
+	identityRows := identityHTML(currentUser, currentUserEmail)
 
 	var pageContent string
 	switch subPath {
@@ -205,11 +208,11 @@ func helloRouter(w http.ResponseWriter, r *http.Request) {
 <p><strong>MESSAGE:</strong> %s</p>
 <p><strong>GREETING_STYLE:</strong> %s</p>
 <p><strong>Organization:</strong> %s</p>`,
-			safeMessage, safeGreetingStyle, safeOrg)
+			safeMessage, safeGreetingStyle, safeOrg) + identityRows + credConfigHTML()
 	case "about":
 		pageContent = `<h1>About</h1>
 <p>This is the <strong>cy-go-plugin</strong> demo plugin for Cycloid.</p>
-<p>Version: 0.0.9</p>
+<p>Version: 0.0.10</p>
 <p>It demonstrates multi-page navigation inside a plugin iframe widget.</p>`
 	case "credentials":
 		if orgCanonical == "" {
@@ -243,6 +246,7 @@ func helloRouter(w http.ResponseWriter, r *http.Request) {
 		if greetingStyle != "" {
 			pageContent += fmt.Sprintf("\n<p>Greeting Style: %s</p>", safeGreetingStyle)
 		}
+		pageContent += identityRows + credConfigHTML()
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -254,6 +258,13 @@ func helloRouter(w http.ResponseWriter, r *http.Request) {
   nav { background: #f5f5f5; padding: 8px 16px; margin: -16px -16px 16px; display: flex; gap: 16px; }
   nav a { color: #1976d2; text-decoration: none; cursor: pointer; font-weight: 500; }
   nav a:hover { text-decoration: underline; }
+  table.creds { border-collapse: collapse; margin: 8px 0 4px; }
+  table.creds th, table.creds td { border: 1px solid #ddd; padding: 4px 10px; text-align: left; }
+  table.creds th { background: #f5f5f5; font-weight: 600; }
+  .good { color: #2e7d32; font-weight: 600; }
+  .bad { color: #c62828; font-weight: 600; }
+  .unset { color: #888; }
+  .hint { color: #555; font-size: 0.9em; }
 </style>
 <script>
 function navigateTo(subPath) {
@@ -281,4 +292,90 @@ function navigateTo(subPath) {
 func respond(w http.ResponseWriter, request string) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"request": request})
+}
+
+// credField describes one cy_cred manifest entry and the env var the platform
+// injects it as. The plugin manager upper-cases config keys to build env names.
+type credField struct {
+	Key     string
+	EnvName string
+}
+
+// credFields lists the cy_cred entries declared in manifest.yaml.
+var credFields = []credField{
+	{Key: "external_api_cred", EnvName: "EXTERNAL_API_CRED"},
+	{Key: "basic_auth_cred", EnvName: "BASIC_AUTH_CRED"},
+}
+
+// isUnresolvedRef reports whether v is still a literal ((canonical.field))
+// reference. The plugin manager substitutes these for the real secret at
+// container init, so a ref reaching the plugin means resolution did not happen.
+func isUnresolvedRef(v string) bool {
+	return strings.HasPrefix(v, "((") && strings.HasSuffix(v, "))")
+}
+
+// credConfigHTML renders every cy_cred value this container received, labelling
+// each as resolved, unresolved or unset. Values are printed verbatim on purpose:
+// this is a test plugin whose job is to prove credential resolution works.
+func credConfigHTML() string {
+	var b strings.Builder
+	b.WriteString(`<h2>Credential configuration</h2>`)
+	b.WriteString(`<table class="creds">`)
+	b.WriteString(`<tr><th>Config key</th><th>Env var</th><th>Status</th><th>Value</th></tr>`)
+	for _, c := range credFields {
+		v := os.Getenv(c.EnvName)
+		var status, value string
+		switch {
+		case v == "":
+			status, value = `<span class="unset">not set</span>`, `<span class="unset">&mdash;</span>`
+		case isUnresolvedRef(v):
+			status = `<span class="bad">UNRESOLVED</span>`
+			value = `<code>` + html.EscapeString(v) + `</code>`
+		default:
+			status = `<span class="good">resolved</span>`
+			value = `<code>` + html.EscapeString(v) + `</code>`
+		}
+		b.WriteString(`<tr><td><code>` + html.EscapeString(c.Key) + `</code></td>` +
+			`<td><code>` + html.EscapeString(c.EnvName) + `</code></td>` +
+			`<td>` + status + `</td><td>` + value + `</td></tr>`)
+	}
+	b.WriteString(`</table>`)
+	b.WriteString(`<p class="hint">A value shown as <span class="bad">UNRESOLVED</span> means the ` +
+		`plugin manager passed the raw <code>((canonical.field))</code> reference through instead of ` +
+		`fetching the secret.</p>`)
+	return b.String()
+}
+
+// identityHTML renders the per-viewer identity the platform interpolated into
+// the widget query (current_user_username / current_user_email).
+//
+// The point of this block is to tell three outcomes apart, so neither of the
+// failure modes can be mistaken for the other or for success:
+//   - the param is absent entirely: the widget query did not ask for it, which
+//     means an older plugin version is installed;
+//   - the param is the literal "<no value>": the platform knows the variable
+//     but the interpolator had nothing to put in it (no primary email, or the
+//     principal was skipped by the API-key guard);
+//   - the param carries a value: interpolation worked end to end.
+func identityHTML(user, email string) string {
+	return `
+<h2>Current user</h2>
+<table class="creds">
+<tr><th>Variable</th><th>Value</th></tr>
+<tr><td>current_user_username</td><td>` + identityValue(user) + `</td></tr>
+<tr><td>current_user_email</td><td>` + identityValue(email) + `</td></tr>
+</table>
+<p class="hint">Interpolated server-side from the widget query; the iframe cannot set these.</p>`
+}
+
+// identityValue formats one interpolated value, never as a blank cell.
+func identityValue(raw string) string {
+	switch raw {
+	case "":
+		return `<span class="unset">(not sent &mdash; widget query does not ask for it)</span>`
+	case "<no value>":
+		return `<span class="bad">&lt;no value&gt; (interpolator had nothing)</span>`
+	default:
+		return `<span class="good">` + html.EscapeString(raw) + `</span>`
+	}
 }

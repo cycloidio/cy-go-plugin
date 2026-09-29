@@ -29,3 +29,11 @@ configuration:
   widget: cy_cred
   widget_config:
     cred_types: ["custom"]
+- name: "Basic Auth Credential"
+  key: basic_auth_cred
+  description: "Credential for a basic-auth protected service. Select a basic_auth credential; its chosen field will be injected as BASIC_AUTH_CRED env var."
+  required: false
+  type: string
+  widget: cy_cred
+  widget_config:
+    cred_types: ["basic_auth"]

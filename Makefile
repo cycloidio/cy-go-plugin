@@ -1,4 +1,4 @@
-VERSION=0.0.8
+VERSION=0.0.10
 LOCAL_REGISTRY=localhost:5000
 
 .PHONY: docker-release

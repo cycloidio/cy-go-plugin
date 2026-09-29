@@ -38,4 +38,4 @@
       title: Hello World
       description: Displays a greeting with the configured message
   widget:
-    query: "/ui/hello?org=($ .organization_canonical $)"
+    query: "/ui/hello?org=($ .organization_canonical $)&user=($ .current_user_username $)&email=($ .current_user_email $)"
